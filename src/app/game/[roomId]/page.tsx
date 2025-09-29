@@ -93,7 +93,8 @@ export default function GameRoom() {
   }, [room]);
 
   const handleSelectCard = (choice: 'rock' | 'paper' | 'scissors') => {
-    const me = room?.players[socket!.id];
+    const myId = socket?.id;
+    const me = myId ? room?.players[myId] : undefined;
     if (
       room?.gameState === 'playing' &&
       !myChoice &&
