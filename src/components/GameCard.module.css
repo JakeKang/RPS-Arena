@@ -1,0 +1,42 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 150px;
+  background-color: rgba(255, 255, 255, 0.8);
+  color: #333;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.card:hover:not(.disabled) {
+  transform: translateY(-5px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.symbol {
+  font-size: 3rem;
+}
+
+.label {
+  margin-top: 0.5rem;
+  font-weight: bold;
+}
+
+.selected {
+  border-color: #28a745;
+  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(40, 167, 69, 0.5);
+  background-color: #fff;
+}
+
+.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  background-color: #e9ecef;
+}

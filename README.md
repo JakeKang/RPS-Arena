@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ✊✋✌️ RPS Arena: 실시간 가위바위보 서바이벌
 
-## Getting Started
+**RPS Arena**는 **Next.js**와 **Socket.IO**를 기반으로 제작된 실시간 멀티플레이어 가위바위보 서바이벌 게임입니다. 단순한 가위바위보를 넘어, 플레이어들은 목표 순위를 설정하고 최후의 생존자가 아닌 **'목표 순위 달성'**을 위해 전략적인 플레이를 펼쳐야 합니다. 탈락한 플레이어는 관전하며 게임의 끝을 함께할 수 있습니다.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## ✨ 주요 기능 (Features)
+
+- **닉네임 시스템**: 모든 플레이어는 자신만의 닉네임을 설정하여 게임에 참여합니다.
+- **커스텀 게임 설정**: 방 생성 시 **최대 인원**과 게임의 목표가 되는 **당첨 순위**를 직접 설정할 수 있습니다.
+- **고유 방 코드**: 4자리의 랜덤 코드를 통해 친구들과 비공개로 게임을 즐길 수 있습니다.
+- **서바이벌 게임 방식**:
+  - 매 라운드마다 패배자는 탈락하며, 남은 인원에 따라 순위가 실시간으로 결정됩니다.
+  - 게임은 설정된 **'당첨 순위'**의 플레이어가 나올 때까지 자동으로 계속 진행됩니다.
+- **상세한 라운드 결과**: 라운드 종료 후, 모든 참가자가 어떤 선택을 했는지와 생존/탈락 여부를 한눈에 볼 수 있습니다.
+- **무한 게임 방지**: 무승부가 계속될 경우를 대비해 **최대 라운드 제한** 기능이 포함되어 서버 안정성을 확보했습니다.
+- **실시간 동기화**: Socket.IO를 통해 게임 상태, 플레이어 순위, 타이머 등 모든 요소가 실시간으로 완벽하게 동기화됩니다.
+
+---
+
+## 🛠️ 기술 스택 (Tech Stack)
+
+- **프론트엔드**: Next.js (React), TypeScript
+- **실시간 통신 & 서버**: Socket.IO, Node.js (Next.js Custom Server)
+- **스타일링**: CSS Modules
+
+---
+
+## 🚀 시작하기 (Getting Started)
+
+1.  **저장소 복제**:
+
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
+
+2.  **의존성 설치**:
+
+    ```bash
+    npm install
+    ```
+
+3.  **개발 서버 실행**:
+
+    ```bash
+    npm run dev
+    ```
+
+4.  **브라우저에서 접속**:
+    - `http://localhost:3000` 주소로 접속하여 게임을 시작하세요.
+
+---
+
+## 📁 프로젝트 구조
+
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+.
+├── app/              # Next.js App Router
+│   ├── game/[roomId]/page.tsx
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx      # 메인 페이지 (로비)
+├── components/       # 리액트 컴포넌트
+├── context/          # 리액트 컨텍스트
+├── styles/           # CSS 모듈
+├── server.ts         # Socket.IO 및 Next.js 서버 로직
+├── types.ts          # TypeScript 타입 정의
+└── ...
+```
