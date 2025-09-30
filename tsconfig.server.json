@@ -2,7 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "CommonJS",
+    "moduleResolution": "node", // <--- 이 줄을 추가하여 충돌을 해결합니다.
+    "outDir": "dist", // 컴파일된 결과물이 저장될 폴더를 지정합니다.
     "noEmit": false
   },
-  "include": ["server.ts", "types/index.ts"]
+  "include": ["server.ts", "types.ts"] // 경로를 현재 구조에 맞게 수정합니다.
 }
