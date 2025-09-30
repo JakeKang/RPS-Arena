@@ -1,0 +1,9 @@
+app:
+  # 1단계에서 압축 해제할 이미지 이름과 태그를 정확히 입력합니다.
+  image: rps-game-app:latest
+  container_name: rps-game
+  ports:
+    - '3000:3000'
+  restart: unless-stopped
+  environment:
+    - NODE_ENV=production
