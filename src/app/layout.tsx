@@ -6,8 +6,9 @@ import { SocketProvider } from '@/contexts/SocketContext';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'RPS Arena',
-  description: '최후의 승자가 되어보세요!',
+  // title: 'RPS Arena',
+  title: '가위바위보 내기용',
+  description: '안내면 진거!',
 };
 
 export default function RootLayout({

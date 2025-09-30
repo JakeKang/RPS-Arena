@@ -174,7 +174,8 @@ export default function GameRoom() {
     <div className={styles.container}>
       <header className={styles.header}>
         <div className={styles.headerInfo}>
-          <h1>RPS Arena</h1>
+          {/*<h1>RPS Arena</h1>*/}
+          <h1>가위바위보 내기용</h1>
         </div>
         <button onClick={handleLeaveRoom} className={styles.leaveButton}>
           나가기

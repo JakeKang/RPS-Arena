@@ -55,8 +55,10 @@ export default function Home() {
   return (
     <main className={styles.container}>
       <div className={styles.logo}>
-        <h1>RPS Arena</h1>
-        <p>최후의 승자가 되어보세요!</p>
+        {/*<h1>RPS Arena</h1>*/}
+        <h1>가위바위보 내기용</h1>
+        {/*<p>최후의 승자가 되어보세요!</p>*/}
+        <p>안내면 진거!</p>
       </div>
       <div className={styles.lobbyCard}>
         <div className={styles.inputGroup}>
