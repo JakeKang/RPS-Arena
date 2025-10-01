@@ -1,13 +1,15 @@
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import next from 'next';
+import fs from 'fs';
+import path from 'path';
 import {
   Choice,
   Player,
   Room,
-  RoundResultPayload,
   RankedPlayer,
   RoundPlayerResult,
+  RoundResultPayload,
 } from '@/types/index.type';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -16,6 +18,30 @@ const handle = app.getRequestHandler();
 
 const rooms: Record<string, Room> = {};
 const MAX_ROUNDS = 50;
+
+// 로그 디렉토리 생성
+const LOGS_DIR = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(LOGS_DIR)) {
+  fs.mkdirSync(LOGS_DIR, { recursive: true });
+}
+
+// 게임 로그 기록 함수
+function logGameEvent(roomId: string, message: string) {
+  const room = rooms[roomId];
+  if (!room) return;
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const logFileName = `${roomId}-${timestamp.split('T')[0]}.txt`;
+  const logFilePath = path.join(LOGS_DIR, logFileName);
+
+  const logMessage = `[${new Date().toISOString()}] ${message}\n`;
+
+  try {
+    fs.appendFileSync(logFilePath, logMessage, 'utf8');
+  } catch (error) {
+    console.error('로그 기록 실패:', error);
+  }
+}
 
 function generateRoomId(length: number): string {
   const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
@@ -27,76 +53,92 @@ function generateRoomId(length: number): string {
 }
 
 function determineRoundOutcome(currentPlayers: Player[]): {
-  winners?: Player[];
-  losers?: Player[];
+  winners: Player[];
+  losers: Player[];
 } {
   const choicesMap = new Map<Choice, Player[]>();
+  const playersWhoDidNotChoose: Player[] = [];
   currentPlayers.forEach((p) => {
     if (p.choice) {
       if (!choicesMap.has(p.choice)) choicesMap.set(p.choice, []);
       choicesMap.get(p.choice)!.push(p);
+    } else {
+      playersWhoDidNotChoose.push(p);
     }
   });
 
+  // 모든 플레이어가 선택하지 않았을 경우, 무승부로 처리하여 재대결
+  if (choicesMap.size === 0) {
+    return { winners: [], losers: [] };
+  }
+
   const uniqueChoices = Array.from(choicesMap.keys());
 
-  // 선택이 2가지가 아니면 무승부 (모두 같거나, 3가지 모두 나옴)
-  if (uniqueChoices.length !== 2) return {};
+  // 선택지가 1개이거나 3개 이상일 경우(무승부), 패자는 미선택자 뿐
+  if (uniqueChoices.length !== 2) {
+    const winners =
+      choicesMap.size === 1 ? currentPlayers.filter((p) => p.choice) : [];
+    return { winners, losers: playersWhoDidNotChoose };
+  }
 
   const [c1, c2] = uniqueChoices;
   let winnerChoice: Choice = null;
-  let loserChoice: Choice = null;
 
-  if (c1 === 'rock' && c2 === 'scissors') {
+  if (
+    (c1 === 'rock' && c2 === 'scissors') ||
+    (c1 === 'scissors' && c2 === 'rock')
+  )
     winnerChoice = 'rock';
-    loserChoice = 'scissors';
-  } else if (c1 === 'scissors' && c2 === 'rock') {
-    winnerChoice = 'rock';
-    loserChoice = 'scissors';
-  } else if (c1 === 'paper' && c2 === 'rock') {
+  else if (
+    (c1 === 'paper' && c2 === 'rock') ||
+    (c1 === 'rock' && c2 === 'paper')
+  )
     winnerChoice = 'paper';
-    loserChoice = 'rock';
-  } else if (c1 === 'rock' && c2 === 'paper') {
-    winnerChoice = 'paper';
-    loserChoice = 'rock';
-  } else if (c1 === 'scissors' && c2 === 'paper') {
+  else if (
+    (c1 === 'scissors' && c2 === 'paper') ||
+    (c1 === 'paper' && c2 === 'scissors')
+  )
     winnerChoice = 'scissors';
-    loserChoice = 'paper';
-  } else if (c1 === 'paper' && c2 === 'scissors') {
-    winnerChoice = 'paper';
-    loserChoice = 'scissors';
-  }
 
   const winners = choicesMap.get(winnerChoice) || [];
-  const losers = choicesMap.get(loserChoice) || [];
+  const roundLosers = choicesMap.get(winnerChoice === c1 ? c2 : c1) || [];
+  const losers = roundLosers.concat(playersWhoDidNotChoose);
 
-  // 승자 또는 패자 중 한쪽이라도 있으면 결과 반환
-  if (winners.length > 0 && losers.length > 0) {
-    // 1:1 대결은 무조건 순위 확정
-    if (winners.length === 1 && losers.length === 1) {
-      return { winners, losers };
-    }
-    // 승자가 더 적으면 승자들을 탈락시킴 (상위 순위)
-    else if (winners.length < losers.length) {
-      return { winners };
-    }
-    // 패자가 더 적으면 패자들을 탈락시킴 (하위 순위)
-    else if (losers.length < winners.length) {
-      return { losers };
-    }
-    // 동수면 재대결 (아무도 탈락 안함)
-    else {
-      return {};
-    }
-  }
+  return { winners, losers };
+}
 
-  return {};
+function assignRanks(
+  playersToRank: Player[],
+  isWinners: boolean,
+  room: Room,
+  newlyRankedPlayers: RankedPlayer[],
+) {
+  const totalPlayers = Object.keys(room.players).length;
+  const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
+
+  playersToRank.forEach((player) => {
+    let rank: number;
+    if (isWinners) {
+      rank = 1;
+      while (takenRanks.has(rank)) rank++;
+    } else {
+      rank = totalPlayers;
+      while (takenRanks.has(rank)) rank--;
+    }
+
+    player.status = 'eliminated';
+    const rankedPlayer = { nickname: player.nickname, rank };
+    room.rankedPlayers.push(rankedPlayer);
+    newlyRankedPlayers.push(rankedPlayer);
+    takenRanks.add(rank);
+  });
 }
 
 const handlePlayerLeave = (io: Server, socketId: string) => {
   for (const roomId in rooms) {
     const room = rooms[roomId];
     if (room.players[socketId]) {
+      const playerNickname = room.players[socketId].nickname;
       delete room.players[socketId];
       if (Object.keys(room.players).length === 0) {
         if (room.gameTimer) clearInterval(room.gameTimer);
@@ -104,6 +146,7 @@ const handlePlayerLeave = (io: Server, socketId: string) => {
       } else {
         if (room.hostId === socketId)
           room.hostId = Object.keys(room.players)[0];
+        logGameEvent(roomId, `플레이어 나감: ${playerNickname} (${socketId})`);
         io.to(roomId).emit('update_room', room);
       }
       break;
@@ -116,68 +159,60 @@ app.prepare().then(() => {
   const io = new Server(httpServer, { cors: { origin: '*' } });
 
   io.on('connection', (socket: Socket) => {
-    socket.on(
-      'create_room',
-      ({
+    socket.on('create_room', ({ nickname, maxPlayers, targetRank }) => {
+      let roomId = generateRoomId(4);
+      while (rooms[roomId]) {
+        roomId = generateRoomId(4);
+      }
+      const newRoom: Room = {
+        id: roomId,
+        players: {},
+        maxPlayers: Math.max(2, maxPlayers),
+        targetRank: Math.max(1, Math.min(targetRank, maxPlayers)),
+        gameState: 'waiting',
+        gameTimer: null,
+        hostId: socket.id,
+        currentRound: 0,
+        rankedPlayers: [],
+      };
+      const player: Player = {
+        id: socket.id,
         nickname,
-        maxPlayers,
-        targetRank,
-      }: {
-        nickname: string;
-        maxPlayers: number;
-        targetRank: number;
-      }) => {
-        let roomId = generateRoomId(4);
-        while (rooms[roomId]) {
-          roomId = generateRoomId(4);
-        }
-        const newRoom: Room = {
-          id: roomId,
-          players: {},
-          maxPlayers: Math.max(2, maxPlayers),
-          targetRank: Math.max(1, Math.min(targetRank, maxPlayers)),
-          gameState: 'waiting',
-          gameTimer: null,
-          hostId: socket.id,
-          currentRound: 0,
-          rankedPlayers: [],
-        };
-        const player: Player = {
-          id: socket.id,
-          nickname,
-          choice: null,
-          status: 'playing',
-        };
-        newRoom.players[socket.id] = player;
-        rooms[roomId] = newRoom;
-        socket.join(roomId);
-        socket.emit('room_created', roomId);
-        io.to(roomId).emit('update_room', newRoom);
-      },
-    );
+        choice: null,
+        status: 'playing',
+      };
+      newRoom.players[socket.id] = player;
+      rooms[roomId] = newRoom;
+      socket.join(roomId);
+      socket.emit('room_created', roomId);
+      io.to(roomId).emit('update_room', newRoom);
+      logGameEvent(roomId, `=== 게임방 생성 ===`);
+      logGameEvent(
+        roomId,
+        `방 코드: ${roomId}, 최대 인원: ${maxPlayers}명, 목표 순위: ${newRoom.targetRank}등`,
+      );
+      logGameEvent(roomId, `방장: ${nickname} (${socket.id})`);
+    });
 
-    socket.on(
-      'join_room',
-      ({ roomId, nickname }: { roomId: string; nickname: string }) => {
-        const room = rooms[roomId];
-        if (!room)
-          return socket.emit('error_message', '방을 찾을 수 없습니다.');
-        if (Object.keys(room.players).length >= room.maxPlayers)
-          return socket.emit('error_message', '방이 가득 찼습니다.');
-        if (room.gameState !== 'waiting')
-          return socket.emit('error_message', '게임이 이미 시작되었습니다.');
-        const player: Player = {
-          id: socket.id,
-          nickname,
-          choice: null,
-          status: 'playing',
-        };
-        room.players[socket.id] = player;
-        socket.join(roomId);
-        socket.emit('joined_room', roomId);
-        io.to(roomId).emit('update_room', room);
-      },
-    );
+    socket.on('join_room', ({ roomId, nickname }) => {
+      const room = rooms[roomId];
+      if (!room) return socket.emit('error_message', '방을 찾을 수 없습니다.');
+      if (Object.keys(room.players).length >= room.maxPlayers)
+        return socket.emit('error_message', '방이 가득 찼습니다.');
+      if (room.gameState !== 'waiting')
+        return socket.emit('error_message', '게임이 이미 시작되었습니다.');
+      const player: Player = {
+        id: socket.id,
+        nickname,
+        choice: null,
+        status: 'playing',
+      };
+      room.players[socket.id] = player;
+      socket.join(roomId);
+      socket.emit('joined_room', roomId);
+      io.to(roomId).emit('update_room', room);
+      logGameEvent(roomId, `플레이어 입장: ${nickname} (${socket.id})`);
+    });
 
     socket.on('get_room', (roomId: string) => {
       if (roomId && rooms[roomId]?.players[socket.id])
@@ -192,6 +227,17 @@ app.prepare().then(() => {
       Object.values(room.players).forEach((p) => {
         if (p.status === 'playing') p.choice = null;
       });
+
+      const activePlayersForLog = Object.values(room.players).filter(
+        (p) => p.status === 'playing',
+      );
+      logGameEvent(
+        roomId,
+        `\n=== 라운드 ${room.currentRound} 시작 === | 참가자 (${
+          activePlayersForLog.length
+        }명): ${activePlayersForLog.map((p) => p.nickname).join(', ')}`,
+      );
+
       io.to(roomId).emit('new_round', room.currentRound);
       io.to(roomId).emit('update_room', room);
       let countdown = 5;
@@ -206,183 +252,120 @@ app.prepare().then(() => {
           const activePlayers = Object.values(room.players).filter(
             (p) => p.status === 'playing',
           );
-          const roundOutcome = determineRoundOutcome(activePlayers);
+          const { winners, losers } = determineRoundOutcome(activePlayers);
           const newlyRankedPlayers: RankedPlayer[] = [];
 
           const roundPlayersResult: RoundPlayerResult[] = activePlayers.map(
             (p) => ({
               nickname: p.nickname,
               choice: p.choice,
-              eliminated:
-                roundOutcome.winners?.some((w) => w.id === p.id) ||
-                roundOutcome.losers?.some((l) => l.id === p.id) ||
-                false,
+              eliminated: losers.some((l) => l.id === p.id),
             }),
           );
 
-          // ===== 핵심 수정: 목표 순위 기준 탈락 처리 =====
-          const totalPlayers = Object.keys(room.players).length;
-          const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
-
-          // 1:1 대결 특수 처리: 승자와 패자를 동시에 처리
-          const is1v1 =
-            roundOutcome.winners?.length === 1 &&
-            roundOutcome.losers?.length === 1;
-
-          if (is1v1) {
-            const winner = roundOutcome.winners![0];
-            const loser = roundOutcome.losers![0];
-
-            // 승자 순위 계산 (위에서부터)
-            let winnerRank = 1;
-            while (takenRanks.has(winnerRank)) {
-              winnerRank++;
-            }
-
-            // 패자 순위 계산 (아래에서부터, 승자 순위는 아직 추가 안됨)
-            let loserRank = totalPlayers;
-            while (takenRanks.has(loserRank)) {
-              loserRank--;
-            }
-
-            // 둘 다 동시에 적용
-            winner.status = 'eliminated';
-            loser.status = 'eliminated';
-
-            const winnerRankedPlayer = {
-              nickname: winner.nickname,
-              rank: winnerRank,
-            };
-            const loserRankedPlayer = {
-              nickname: loser.nickname,
-              rank: loserRank,
-            };
-
-            room.rankedPlayers.push(winnerRankedPlayer);
-            room.rankedPlayers.push(loserRankedPlayer);
-            newlyRankedPlayers.push(winnerRankedPlayer);
-            newlyRankedPlayers.push(loserRankedPlayer);
+          if (winners.length === 0 && losers.length === 0) {
+            logGameEvent(roomId, `라운드 결과: 무승부 재대결`);
           } else {
-            // 일반 처리: 승자 또는 패자 중 한 그룹만 처리
-            if (roundOutcome.winners && roundOutcome.winners.length > 0) {
-              // 승자들이 받을 순위 계산
-              const winnerRanks: number[] = [];
-              const tempTakenRanks = new Set(takenRanks);
+            const totalPlayers = Object.keys(room.players).length;
+            const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
 
-              roundOutcome.winners.forEach(() => {
-                let rank = 1;
-                while (tempTakenRanks.has(rank)) {
-                  rank++;
-                }
-                winnerRanks.push(rank);
-                tempTakenRanks.add(rank);
-              });
-
-              // 목표 순위가 배정 대상에 포함되는지 확인
-              const includesTarget = winnerRanks.includes(room.targetRank);
-
-              if (includesTarget && roundOutcome.winners.length > 1) {
-                // 목표 순위를 포함하고 2명 이상 → 재대결
-                // 아무도 탈락시키지 않음
-              } else {
-                // 목표 순위가 없거나, 1명만 승리 → 순위 확정
-                roundOutcome.winners.forEach((winner) => {
-                  let rank = 1;
-                  while (takenRanks.has(rank)) {
-                    rank++;
-                  }
-                  winner.status = 'eliminated';
-                  const rankedPlayer = { nickname: winner.nickname, rank };
-                  room.rankedPlayers.push(rankedPlayer);
-                  newlyRankedPlayers.push(rankedPlayer);
-                  takenRanks.add(rank);
-                });
+            const potentialWinnerRanks: number[] = [];
+            if (winners.length > 0) {
+              let nextRank = 1;
+              for (let i = 0; i < winners.length; i++) {
+                while (takenRanks.has(nextRank)) nextRank++;
+                potentialWinnerRanks.push(nextRank++);
               }
             }
 
-            if (roundOutcome.losers && roundOutcome.losers.length > 0) {
-              // 패자들이 받을 순위 계산
-              const loserRanks: number[] = [];
-              const tempTakenRanks = new Set(takenRanks);
-
-              roundOutcome.losers.forEach(() => {
-                let rank = totalPlayers;
-                while (tempTakenRanks.has(rank)) {
-                  rank--;
-                }
-                loserRanks.push(rank);
-                tempTakenRanks.add(rank);
-              });
-
-              // 목표 순위가 배정 대상에 포함되는지 확인
-              const includesTarget = loserRanks.includes(room.targetRank);
-
-              if (includesTarget && roundOutcome.losers.length > 1) {
-                // 목표 순위를 포함하고 2명 이상 → 재대결
-                // 아무도 탈락시키지 않음
-              } else {
-                // 목표 순위가 없거나, 1명만 패배 → 순위 확정
-                roundOutcome.losers.forEach((loser) => {
-                  let rank = totalPlayers;
-                  while (takenRanks.has(rank)) {
-                    rank--;
-                  }
-                  loser.status = 'eliminated';
-                  const rankedPlayer = { nickname: loser.nickname, rank };
-                  room.rankedPlayers.push(rankedPlayer);
-                  newlyRankedPlayers.push(rankedPlayer);
-                  takenRanks.add(rank);
-                });
+            const potentialLoserRanks: number[] = [];
+            if (losers.length > 0) {
+              let nextRank = totalPlayers;
+              for (let i = 0; i < losers.length; i++) {
+                while (takenRanks.has(nextRank)) nextRank--;
+                potentialLoserRanks.push(nextRank--);
               }
+            }
+
+            const winnersIncludeTarget = potentialWinnerRanks.includes(
+              room.targetRank,
+            );
+            const losersIncludeTarget = potentialLoserRanks.includes(
+              room.targetRank,
+            );
+
+            let winnersShouldHaveRematch =
+              winnersIncludeTarget && winners.length > 1;
+            let losersShouldHaveRematch =
+              losersIncludeTarget && losers.length > 1;
+
+            if (winnersShouldHaveRematch) {
+              logGameEvent(
+                roomId,
+                `결과: 목표 순위(${room.targetRank}등)가 걸린 승자 그룹 재대결. 패자 그룹은 탈락.`,
+              );
+              if (losers) assignRanks(losers, false, room, newlyRankedPlayers);
+            } else if (losersShouldHaveRematch) {
+              logGameEvent(
+                roomId,
+                `결과: 목표 순위(${room.targetRank}등)가 걸린 패자 그룹 재대결. 승자 그룹은 탈락.`,
+              );
+              if (winners) assignRanks(winners, true, room, newlyRankedPlayers);
+            } else {
+              if (winners.length > 0)
+                assignRanks(winners, true, room, newlyRankedPlayers);
+              if (losers.length > 0)
+                assignRanks(losers, false, room, newlyRankedPlayers);
             }
           }
 
           const remainingPlayers = Object.values(room.players).filter(
             (p) => p.status === 'playing',
           );
-
-          // 남은 플레이어가 1명이면 자동으로 순위 부여
-          if (remainingPlayers.length === 1) {
-            const lastPlayer = remainingPlayers[0];
-            lastPlayer.status = 'eliminated';
-
-            // 이미 이 플레이어가 순위를 받았는지 확인
-            const alreadyRanked = room.rankedPlayers.some(
-              (p) => p.nickname === lastPlayer.nickname,
-            );
-
-            if (!alreadyRanked) {
-              // 비어있는 순위 찾기 (보통 중간에 남은 순위)
-              const totalPlayers = Object.keys(room.players).length;
-              const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
-              let rank = 1;
-              while (takenRanks.has(rank) && rank <= totalPlayers) {
-                rank++;
-              }
-              const rankedPlayer = { nickname: lastPlayer.nickname, rank };
-              room.rankedPlayers.push(rankedPlayer);
-              newlyRankedPlayers.push(rankedPlayer);
-            }
+          if (
+            remainingPlayers.length === 1 &&
+            Object.values(room.players).length > 1
+          ) {
+            assignRanks(remainingPlayers, true, room, newlyRankedPlayers);
           }
 
-          let isGameOver =
-            remainingPlayers.length === 0 || room.currentRound >= MAX_ROUNDS;
+          const isGameOver =
+            Object.values(room.players).every((p) => p.status !== 'playing') ||
+            room.currentRound >= MAX_ROUNDS;
           const achievedTarget = newlyRankedPlayers.find(
             (p) => p.rank === room.targetRank,
           );
-          if (achievedTarget) isGameOver = true;
 
           const payload: RoundResultPayload = {
             round: room.currentRound,
-            isGameOver,
+            isGameOver: isGameOver || !!achievedTarget,
             roundPlayers: roundPlayersResult,
             achievedTargetRank: achievedTarget ? [achievedTarget] : undefined,
           };
+
           io.to(roomId).emit('round_result', payload);
           io.to(roomId).emit('update_room', room);
 
-          if (isGameOver) {
+          if (isGameOver || achievedTarget) {
             room.gameState = 'results';
+            logGameEvent(roomId, `\n=== 게임 종료 ===`);
+            const sortedRanks = [...room.rankedPlayers].sort(
+              (a, b) => a.rank - b.rank,
+            );
+            sortedRanks.forEach((p) =>
+              logGameEvent(
+                roomId,
+                `  ${p.rank}등: ${p.nickname} ${
+                  p.rank === room.targetRank ? '⭐ 당첨!' : ''
+                }`,
+              ),
+            );
+            if (achievedTarget)
+              logGameEvent(
+                roomId,
+                `🎉 목표 순위 달성! ${achievedTarget.nickname}님이 ${achievedTarget.rank}등으로 당첨!`,
+              );
+
             setTimeout(() => {
               io.to(roomId).emit('game_over_redirect');
             }, 10000);
@@ -401,9 +384,18 @@ app.prepare().then(() => {
         Object.keys(room.players).length < 2
       )
         return;
+
       room.gameState = 'playing';
       room.rankedPlayers = [];
       Object.values(room.players).forEach((p) => (p.status = 'playing'));
+
+      logGameEvent(
+        roomId,
+        `\n게임 시작! 참가자: ${Object.values(room.players)
+          .map((p) => p.nickname)
+          .join(', ')}`,
+      );
+
       startRound(roomId);
     });
 

@@ -151,7 +151,7 @@ export default function GameRoom() {
                 {choiceToEmoji(p.choice)}
               </span>
               <span className={styles.resultPlayerStatus}>
-                {p.eliminated ? '❌ 탈락' : '✅ 생존'}
+                {p.eliminated ? '❌ 짐' : '✅ 이김'}
               </span>
             </li>
           ))}
