@@ -5,5 +5,5 @@ services:
       dockerfile: Dockerfile
     container_name: rps-game
     ports:
-      - '3000:3000'
+      - '3005:3005'
     restart: unless-stopped

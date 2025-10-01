@@ -347,7 +347,7 @@ app.prepare().then(() => {
     socket.on('disconnect', () => handlePlayerLeave(io, socket.id));
   });
 
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 3005;
   httpServer.listen(PORT, () =>
     console.log(`> Ready on http://localhost:${PORT}`),
   );
