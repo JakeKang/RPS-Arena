@@ -15,7 +15,7 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 const rooms: Record<string, Room> = {};
-const MAX_ROUNDS = 50; // 무한 루프 방지를 위한 최대 라운드 제한
+const MAX_ROUNDS = 50;
 
 function generateRoomId(length: number): string {
   const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
@@ -27,47 +27,72 @@ function generateRoomId(length: number): string {
 }
 
 function determineRoundOutcome(currentPlayers: Player[]): {
-  winners: Player[];
-  losers: Player[];
-  draw: boolean;
+  winners?: Player[];
+  losers?: Player[];
 } {
-  const choices = currentPlayers
-    .map((p) => p.choice)
-    .filter((c): c is NonNullable<Choice> => c !== null);
-  const uniqueChoices = [...new Set(choices)];
+  const choicesMap = new Map<Choice, Player[]>();
+  currentPlayers.forEach((p) => {
+    if (p.choice) {
+      if (!choicesMap.has(p.choice)) choicesMap.set(p.choice, []);
+      choicesMap.get(p.choice)!.push(p);
+    }
+  });
 
-  if (uniqueChoices.length !== 2) {
-    return { winners: currentPlayers, losers: [], draw: true };
-  }
+  const uniqueChoices = Array.from(choicesMap.keys());
+
+  // 선택이 2가지가 아니면 무승부 (모두 같거나, 3가지 모두 나옴)
+  if (uniqueChoices.length !== 2) return {};
 
   const [c1, c2] = uniqueChoices;
   let winnerChoice: Choice = null;
+  let loserChoice: Choice = null;
 
-  if (
-    (c1 === 'rock' && c2 === 'scissors') ||
-    (c1 === 'scissors' && c2 === 'rock')
-  )
+  if (c1 === 'rock' && c2 === 'scissors') {
     winnerChoice = 'rock';
-  else if (
-    (c1 === 'paper' && c2 === 'rock') ||
-    (c1 === 'rock' && c2 === 'paper')
-  )
+    loserChoice = 'scissors';
+  } else if (c1 === 'scissors' && c2 === 'rock') {
+    winnerChoice = 'rock';
+    loserChoice = 'scissors';
+  } else if (c1 === 'paper' && c2 === 'rock') {
     winnerChoice = 'paper';
-  else if (
-    (c1 === 'scissors' && c2 === 'paper') ||
-    (c1 === 'paper' && c2 === 'scissors')
-  )
+    loserChoice = 'rock';
+  } else if (c1 === 'rock' && c2 === 'paper') {
+    winnerChoice = 'paper';
+    loserChoice = 'rock';
+  } else if (c1 === 'scissors' && c2 === 'paper') {
     winnerChoice = 'scissors';
+    loserChoice = 'paper';
+  } else if (c1 === 'paper' && c2 === 'scissors') {
+    winnerChoice = 'paper';
+    loserChoice = 'scissors';
+  }
 
-  const winners = currentPlayers.filter((p) => p.choice === winnerChoice);
-  const losers = currentPlayers.filter(
-    (p) => p.choice !== null && p.choice !== winnerChoice,
-  );
+  const winners = choicesMap.get(winnerChoice) || [];
+  const losers = choicesMap.get(loserChoice) || [];
 
-  return { winners, losers, draw: false };
+  // 승자 또는 패자 중 한쪽이라도 있으면 결과 반환
+  if (winners.length > 0 && losers.length > 0) {
+    // 1:1 대결은 무조건 순위 확정
+    if (winners.length === 1 && losers.length === 1) {
+      return { winners, losers };
+    }
+    // 승자가 더 적으면 승자들을 탈락시킴 (상위 순위)
+    else if (winners.length < losers.length) {
+      return { winners };
+    }
+    // 패자가 더 적으면 패자들을 탈락시킴 (하위 순위)
+    else if (losers.length < winners.length) {
+      return { losers };
+    }
+    // 동수면 재대결 (아무도 탈락 안함)
+    else {
+      return {};
+    }
+  }
+
+  return {};
 }
 
-// ... (handlePlayerLeave 함수는 이전과 동일)
 const handlePlayerLeave = (io: Server, socketId: string) => {
   for (const roomId in rooms) {
     const room = rooms[roomId];
@@ -77,9 +102,8 @@ const handlePlayerLeave = (io: Server, socketId: string) => {
         if (room.gameTimer) clearInterval(room.gameTimer);
         delete rooms[roomId];
       } else {
-        if (room.hostId === socketId) {
+        if (room.hostId === socketId)
           room.hostId = Object.keys(room.players)[0];
-        }
         io.to(roomId).emit('update_room', room);
       }
       break;
@@ -92,7 +116,6 @@ app.prepare().then(() => {
   const io = new Server(httpServer, { cors: { origin: '*' } });
 
   io.on('connection', (socket: Socket) => {
-    // ... ('create_room', 'join_room', 'get_room' 이벤트 핸들러는 이전과 동일)
     socket.on(
       'create_room',
       ({
@@ -157,9 +180,8 @@ app.prepare().then(() => {
     );
 
     socket.on('get_room', (roomId: string) => {
-      if (roomId && rooms[roomId] && rooms[roomId].players[socket.id]) {
+      if (roomId && rooms[roomId]?.players[socket.id])
         socket.emit('update_room', rooms[roomId]);
-      }
     });
 
     const startRound = (roomId: string) => {
@@ -184,120 +206,177 @@ app.prepare().then(() => {
           const activePlayers = Object.values(room.players).filter(
             (p) => p.status === 'playing',
           );
-          let isGameOver = false;
-
-          // ===== 오류 해결: 최대 라운드 도달 시 게임 강제 종료 =====
-          if (room.currentRound >= MAX_ROUNDS) {
-            isGameOver = true;
-            const finalRank = 1;
-            activePlayers.forEach((p) => {
-              room.players[p.id].status = 'winner';
-              const rankedPlayer = { nickname: p.nickname, rank: finalRank };
-              if (
-                !room.rankedPlayers.some(
-                  (rp) => rp.nickname === rankedPlayer.nickname,
-                )
-              ) {
-                room.rankedPlayers.push(rankedPlayer);
-              }
-            });
-
-            const payload: RoundResultPayload = {
-              round: room.currentRound,
-              isGameOver: true,
-              roundPlayers: activePlayers.map((p) => ({
-                nickname: p.nickname,
-                choice: p.choice,
-                eliminated: false,
-              })),
-              achievedTargetRank: room.rankedPlayers.filter(
-                (p) => p.rank === room.targetRank,
-              ),
-              finalWinner: undefined, // 공동 우승 처리
-            };
-
-            io.to(roomId).emit('round_result', payload);
-            io.to(roomId).emit('update_room', room);
-            setTimeout(() => {
-              io.to(roomId).emit('game_over_redirect');
-            }, 10000);
-            return; // 아래 로직 실행 방지
-          }
-          // =========================================================
-
-          const playersForRound = activePlayers.filter(
-            (p) => p.choice !== null,
-          );
-          const eliminatedForNotChoosing = activePlayers.filter(
-            (p) => p.choice === null,
-          );
-          const roundOutcome = determineRoundOutcome(playersForRound);
-          const eliminatedThisRound = roundOutcome.losers.concat(
-            eliminatedForNotChoosing,
-          );
+          const roundOutcome = determineRoundOutcome(activePlayers);
+          const newlyRankedPlayers: RankedPlayer[] = [];
 
           const roundPlayersResult: RoundPlayerResult[] = activePlayers.map(
             (p) => ({
               nickname: p.nickname,
               choice: p.choice,
-              eliminated: eliminatedThisRound.some((e) => e.id === p.id),
+              eliminated:
+                roundOutcome.winners?.some((w) => w.id === p.id) ||
+                roundOutcome.losers?.some((l) => l.id === p.id) ||
+                false,
             }),
           );
 
-          const remainingPlayers = activePlayers.filter(
-            (p) => !eliminatedThisRound.find((e) => e.id === p.id),
-          );
-          if (eliminatedThisRound.length > 0) {
-            const rankForEliminated = remainingPlayers.length + 1;
-            eliminatedThisRound.forEach((p) => {
-              if (room.players[p.id]) {
-                room.players[p.id].status = 'eliminated';
-                const rankedPlayer = {
-                  nickname: p.nickname,
-                  rank: rankForEliminated,
-                };
-                if (
-                  !room.rankedPlayers.some(
-                    (rp) => rp.nickname === rankedPlayer.nickname,
-                  )
-                )
+          // ===== 핵심 수정: 목표 순위 기준 탈락 처리 =====
+          const totalPlayers = Object.keys(room.players).length;
+          const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
+
+          // 1:1 대결 특수 처리: 승자와 패자를 동시에 처리
+          const is1v1 =
+            roundOutcome.winners?.length === 1 &&
+            roundOutcome.losers?.length === 1;
+
+          if (is1v1) {
+            const winner = roundOutcome.winners![0];
+            const loser = roundOutcome.losers![0];
+
+            // 승자 순위 계산 (위에서부터)
+            let winnerRank = 1;
+            while (takenRanks.has(winnerRank)) {
+              winnerRank++;
+            }
+
+            // 패자 순위 계산 (아래에서부터, 승자 순위는 아직 추가 안됨)
+            let loserRank = totalPlayers;
+            while (takenRanks.has(loserRank)) {
+              loserRank--;
+            }
+
+            // 둘 다 동시에 적용
+            winner.status = 'eliminated';
+            loser.status = 'eliminated';
+
+            const winnerRankedPlayer = {
+              nickname: winner.nickname,
+              rank: winnerRank,
+            };
+            const loserRankedPlayer = {
+              nickname: loser.nickname,
+              rank: loserRank,
+            };
+
+            room.rankedPlayers.push(winnerRankedPlayer);
+            room.rankedPlayers.push(loserRankedPlayer);
+            newlyRankedPlayers.push(winnerRankedPlayer);
+            newlyRankedPlayers.push(loserRankedPlayer);
+          } else {
+            // 일반 처리: 승자 또는 패자 중 한 그룹만 처리
+            if (roundOutcome.winners && roundOutcome.winners.length > 0) {
+              // 승자들이 받을 순위 계산
+              const winnerRanks: number[] = [];
+              const tempTakenRanks = new Set(takenRanks);
+
+              roundOutcome.winners.forEach(() => {
+                let rank = 1;
+                while (tempTakenRanks.has(rank)) {
+                  rank++;
+                }
+                winnerRanks.push(rank);
+                tempTakenRanks.add(rank);
+              });
+
+              // 목표 순위가 배정 대상에 포함되는지 확인
+              const includesTarget = winnerRanks.includes(room.targetRank);
+
+              if (includesTarget && roundOutcome.winners.length > 1) {
+                // 목표 순위를 포함하고 2명 이상 → 재대결
+                // 아무도 탈락시키지 않음
+              } else {
+                // 목표 순위가 없거나, 1명만 승리 → 순위 확정
+                roundOutcome.winners.forEach((winner) => {
+                  let rank = 1;
+                  while (takenRanks.has(rank)) {
+                    rank++;
+                  }
+                  winner.status = 'eliminated';
+                  const rankedPlayer = { nickname: winner.nickname, rank };
                   room.rankedPlayers.push(rankedPlayer);
-              }
-            });
-          }
-
-          let achievedTarget = room.rankedPlayers.find(
-            (p) => p.rank === room.targetRank,
-          );
-          isGameOver = !!achievedTarget;
-          let finalWinner: RankedPlayer | undefined = undefined;
-
-          if (remainingPlayers.length === 1 && !isGameOver) {
-            const winner = remainingPlayers[0];
-            if (room.players[winner.id].status === 'playing') {
-              room.players[winner.id].status = 'winner';
-              finalWinner = { nickname: winner.nickname, rank: 1 };
-              if (
-                !room.rankedPlayers.some(
-                  (rp) => rp.nickname === finalWinner!.nickname,
-                )
-              )
-                room.rankedPlayers.push(finalWinner);
-              if (room.targetRank === 1) {
-                achievedTarget = finalWinner;
-                isGameOver = true;
+                  newlyRankedPlayers.push(rankedPlayer);
+                  takenRanks.add(rank);
+                });
               }
             }
-          } else if (remainingPlayers.length < 1 && !isGameOver) {
-            isGameOver = true;
+
+            if (roundOutcome.losers && roundOutcome.losers.length > 0) {
+              // 패자들이 받을 순위 계산
+              const loserRanks: number[] = [];
+              const tempTakenRanks = new Set(takenRanks);
+
+              roundOutcome.losers.forEach(() => {
+                let rank = totalPlayers;
+                while (tempTakenRanks.has(rank)) {
+                  rank--;
+                }
+                loserRanks.push(rank);
+                tempTakenRanks.add(rank);
+              });
+
+              // 목표 순위가 배정 대상에 포함되는지 확인
+              const includesTarget = loserRanks.includes(room.targetRank);
+
+              if (includesTarget && roundOutcome.losers.length > 1) {
+                // 목표 순위를 포함하고 2명 이상 → 재대결
+                // 아무도 탈락시키지 않음
+              } else {
+                // 목표 순위가 없거나, 1명만 패배 → 순위 확정
+                roundOutcome.losers.forEach((loser) => {
+                  let rank = totalPlayers;
+                  while (takenRanks.has(rank)) {
+                    rank--;
+                  }
+                  loser.status = 'eliminated';
+                  const rankedPlayer = { nickname: loser.nickname, rank };
+                  room.rankedPlayers.push(rankedPlayer);
+                  newlyRankedPlayers.push(rankedPlayer);
+                  takenRanks.add(rank);
+                });
+              }
+            }
           }
+
+          const remainingPlayers = Object.values(room.players).filter(
+            (p) => p.status === 'playing',
+          );
+
+          // 남은 플레이어가 1명이면 자동으로 순위 부여
+          if (remainingPlayers.length === 1) {
+            const lastPlayer = remainingPlayers[0];
+            lastPlayer.status = 'eliminated';
+
+            // 이미 이 플레이어가 순위를 받았는지 확인
+            const alreadyRanked = room.rankedPlayers.some(
+              (p) => p.nickname === lastPlayer.nickname,
+            );
+
+            if (!alreadyRanked) {
+              // 비어있는 순위 찾기 (보통 중간에 남은 순위)
+              const totalPlayers = Object.keys(room.players).length;
+              const takenRanks = new Set(room.rankedPlayers.map((p) => p.rank));
+              let rank = 1;
+              while (takenRanks.has(rank) && rank <= totalPlayers) {
+                rank++;
+              }
+              const rankedPlayer = { nickname: lastPlayer.nickname, rank };
+              room.rankedPlayers.push(rankedPlayer);
+              newlyRankedPlayers.push(rankedPlayer);
+            }
+          }
+
+          let isGameOver =
+            remainingPlayers.length === 0 || room.currentRound >= MAX_ROUNDS;
+          const achievedTarget = newlyRankedPlayers.find(
+            (p) => p.rank === room.targetRank,
+          );
+          if (achievedTarget) isGameOver = true;
 
           const payload: RoundResultPayload = {
             round: room.currentRound,
             isGameOver,
             roundPlayers: roundPlayersResult,
             achievedTargetRank: achievedTarget ? [achievedTarget] : undefined,
-            finalWinner,
           };
           io.to(roomId).emit('round_result', payload);
           io.to(roomId).emit('update_room', room);
@@ -314,7 +393,6 @@ app.prepare().then(() => {
       }, 1000);
     };
 
-    // ... ('start_game', 'make_choice', 'leave_room', 'disconnect' 이벤트 핸들러는 이전과 동일)
     socket.on('start_game', (roomId: string) => {
       const room = rooms[roomId];
       if (
@@ -333,7 +411,10 @@ app.prepare().then(() => {
       'make_choice',
       ({ roomId, choice }: { roomId: string; choice: Choice }) => {
         const room = rooms[roomId];
-        if (room?.players[socket.id]?.status === 'playing') {
+        if (
+          room?.players[socket.id]?.status === 'playing' &&
+          room.gameState === 'playing'
+        ) {
           room.players[socket.id].choice = choice;
           io.to(roomId).emit('update_room', room);
         }

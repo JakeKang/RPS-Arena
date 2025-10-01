@@ -93,13 +93,8 @@ export default function GameRoom() {
   }, [room]);
 
   const handleSelectCard = (choice: 'rock' | 'paper' | 'scissors') => {
-    const myId = socket?.id;
-    const me = myId ? room?.players[myId] : undefined;
-    if (
-      room?.gameState === 'playing' &&
-      !myChoice &&
-      me?.status === 'playing'
-    ) {
+    const me = socket?.id && room ? room.players[socket.id] : null;
+    if (room?.gameState === 'playing' && me?.status === 'playing') {
       setMyChoice(choice);
       socket?.emit('make_choice', { roomId, choice });
     }
@@ -121,23 +116,21 @@ export default function GameRoom() {
   };
 
   const isHost = socket?.id === room?.hostId;
-  const me = socket?.id ? room?.players[socket.id] : null;
+  const me = socket?.id && room ? room.players[socket.id] : null;
 
   const renderModalContent = () => {
     if (!roundResult) return null;
     if (roundResult.isGameOver) {
       const targetPlayer = roundResult.achievedTargetRank?.[0];
-      const winner = roundResult.finalWinner;
       return (
         <>
           <h2>게임 종료!</h2>
-          {targetPlayer && (
+          {targetPlayer ? (
             <h3>
-              🎉 {targetPlayer.nickname}님, {targetPlayer.rank}위 달성! 🎉
+              🎉 {targetPlayer.nickname}님, {targetPlayer.rank}위 당첨! 🎉
             </h3>
-          )}
-          {winner && !targetPlayer && (
-            <h3>🏆 최종 우승: {winner.nickname} 🏆</h3>
+          ) : (
+            <h3>최종 순위가 모두 결정되었습니다.</h3>
           )}
           <p className={styles.nextRoundMsg}>
             {gameOverCountdown}초 후 로비로 이동합니다.
@@ -174,8 +167,7 @@ export default function GameRoom() {
     <div className={styles.container}>
       <header className={styles.header}>
         <div className={styles.headerInfo}>
-          {/*<h1>RPS Arena</h1>*/}
-          <h1>가위바위보 내기용</h1>
+          <h1>RPS Arena</h1>
         </div>
         <button onClick={handleLeaveRoom} className={styles.leaveButton}>
           나가기
@@ -239,34 +231,39 @@ export default function GameRoom() {
         <div className={styles.gameArea}>
           <div className={styles.status}>
             {room?.gameState === 'playing' && timer !== null && (
-              <div className={styles.timer}>{timer}</div>
+              <>
+                <div className={styles.timer}>{timer}</div>
+                <p className={styles.promptText}>
+                  시간 내에 가위/바위/보를 선택하세요!
+                </p>
+              </>
             )}
-            <p className={styles.statusText}>
-              {room?.gameState === 'waiting' &&
-                '방장이 시작하기를 기다리는 중...'}
-              {room?.gameState === 'playing' &&
-                `라운드 ${room.currentRound}: 선택하세요!`}
-              {room?.gameState === 'results' && '게임 종료!'}
-            </p>
+            {room?.gameState !== 'playing' && (
+              <p className={styles.statusText}>
+                {room?.gameState === 'waiting' &&
+                  '방장이 시작하기를 기다리는 중...'}
+                {room?.gameState === 'results' && '게임 종료!'}
+              </p>
+            )}
           </div>
           <div className={styles.cardContainer}>
             <GameCard
               type='rock'
               onSelect={handleSelectCard}
               isSelected={myChoice === 'rock'}
-              disabled={!!myChoice || me?.status !== 'playing'}
+              disabled={me?.status !== 'playing'}
             />
             <GameCard
               type='paper'
               onSelect={handleSelectCard}
               isSelected={myChoice === 'paper'}
-              disabled={!!myChoice || me?.status !== 'playing'}
+              disabled={me?.status !== 'playing'}
             />
             <GameCard
               type='scissors'
               onSelect={handleSelectCard}
               isSelected={myChoice === 'scissors'}
-              disabled={!!myChoice || me?.status !== 'playing'}
+              disabled={me?.status !== 'playing'}
             />
           </div>
           {isHost &&

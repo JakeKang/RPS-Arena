@@ -13,7 +13,7 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
-  color: #8b5cf6;
+  color: #fff;
 }
 .headerInfo h1 {
   margin: 0;
@@ -107,10 +107,11 @@
   opacity: 0.6;
 }
 .playerList li.eliminatedPlayer .playerName {
-  text-decoration: line-through;
+  color: #a7a7d1;
 }
 .playerList li.eliminatedPlayer .playerRank {
-  color: #ffc107;
+  color: #2ecc71;
+  font-weight: bold;
 }
 .playerStatus {
   font-size: 1.2rem;
@@ -128,7 +129,11 @@
 .status {
   text-align: center;
   margin-bottom: 2rem;
-  height: 100px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 .statusText {
   font-size: 1.5rem;
@@ -136,11 +141,15 @@
   color: #fff;
   margin: 0;
 }
+.promptText {
+  font-size: 1.1rem;
+  color: #c7d2fe;
+  margin-top: 0.5rem;
+}
 .timer {
   font-size: 4rem;
   font-weight: bold;
   color: #ffc107;
-  margin-bottom: 0.5rem;
   animation: pulse 1s infinite;
 }
 @keyframes pulse {
@@ -222,7 +231,7 @@
 }
 .resultPlayerList li {
   display: grid;
-  grid-template-columns: 1fr 50px 80px;
+  grid-template-columns: 1fr 50px 100px;
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
@@ -231,8 +240,8 @@
   background: rgba(0, 0, 0, 0.2);
   text-align: left;
 }
-.resultPlayerList li.eliminated {
-  opacity: 0.5;
+.resultPlayerList li.winner {
+  background: rgba(46, 204, 113, 0.2);
 }
 .resultPlayerChoice {
   font-size: 1.5rem;
