@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # 👇 빌드 플랫폼을 지정합니다.
+    platform: linux/amd64
     container_name: rps-game
     ports:
       - '3005:3005'
